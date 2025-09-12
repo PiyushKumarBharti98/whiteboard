@@ -49,9 +49,40 @@ export class SocketManager {
             });
             socket.on('leave-canvas', (canvasId: string) => {
                 socket.leave(canvasId);
-                console.log(`user has join the canvas with canvasId ${canvasId}`);
+                console.log(`user has left the canvas with canvasId ${canvasId}`);
+            });
+            socket.on('element-created', async (data) => {
+                try {
+                    await this.handleElementCreated(socket, data);
+                } catch (error) {
+                    console.log('error creating element')
+                }
+            });
+            socket.on('element-updated', async (dataToUpdate, oldData) => {
+                try {
+                    await this.handleElementUpdated(socket, dataToUpdate, oldData);
+                } catch (error) {
+                    socket.emit('error updating element');
+                }
+            });
+            socket.on('element-deleted', async (data) => {
+                try {
+                    await this.handleElementUpdated(socket, data);
+                } catch (error) {
+                    socket.emit('error deleting element')
+                }
+            });
+            socket.on('user-cursors', async (data) => {
+                try {
+                    await this.handleElementUpdated(socket, data);
+                } catch (error) {
+                    socket.emit('error handling multiple cursors')
+                }
             });
         });
+    }
+
+    private async handleElementCreated(socket: any, canvasId: string) {
     }
 
 }
