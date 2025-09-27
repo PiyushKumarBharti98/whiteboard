@@ -1,14 +1,20 @@
 import { Server as SocketIOServer } from 'socket.io';
 import mongoose from "mongoose";
 import { Server as HTTPServer } from 'http';
-//import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
-import { Chat } from '../models/Chat';
-//import { IChat } from '../models/Chat';
-import { Message } from '../models/Message';
 import { socketAuthenticate } from '../middlewares/authMiddleware';
 import { error } from 'console';
+import { element } from '../models/element';
 
+interface UserState {
+    sessionId: string;
+    cursors?: { x: number, y: number };
+}
+
+interface CanvasState {
+    element: any[];
+    users: Map<string, UserState>;
+}
 
 export class SocketManager {
     private io: SocketIOServer;
@@ -41,15 +47,25 @@ export class SocketManager {
         });
     }
 
+    private activeCanvases = new Map<string, CanvasState>
+
     private setupEventHandlers() {
         this.io.on('connection', (socket) => {
             socket.on('join-canvas', (canvasId: string) => {
-                socket.join(canvasId);
-                console.log(`user has join the canvas with canvasId ${canvasId}`);
+                try {
+                    await this.handleJoinCanvas(canvasId);
+                } catch (error) {
+                    console.error(`error joining canvas for ${canvasId}: `, error);
+                    socket.emit(`join-error could not join canvas`)
+                }
             });
             socket.on('leave-canvas', (canvasId: string) => {
-                socket.leave(canvasId);
-                console.log(`user has left the canvas with canvasId ${canvasId}`);
+                try {
+                    await this.handleLeaveCanvas(canvasId);
+                } catch (error) {
+                    console.error(`error leaving canvas for ${canvasId}: `, error);
+                    socket.emit(`leave-error could not leave canvas`)
+                }
             });
             socket.on('element-created', async (data) => {
                 try {
@@ -82,7 +98,42 @@ export class SocketManager {
         });
     }
 
-    private async handleElementCreated(socket: any, canvasId: string) {
+    private async handleJoinCanvas(socket: any) {
+        const { canvasId, sessionId } = socket.data;
+
+        socket.join(canvasId);
+        console.log(`user ${sessionId} joined with canvasId ${canvasId}`);
+
+        let canvasState: CanvasState | undefined = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            console.log(`canvasState not active of the canvas id ${canvasId}`);
+            const canvasDoc = await element.findById(canvasId);
+
+            if (!canvasDoc) {
+                socket.emit('error data could not be found');
+                return;
+            }
+
+            canvasState = {
+                element: canvasDoc.element || [],
+                users: new Map<string, UserState>()
+            }
+
+            this.activeCanvases.set(canvasId, canvasState);
+        }
+
+        const newUser: UserState = { sessionId };
+        canvasState.users.set(socket.id, newUser);
+
+        socket.emit('canvas state', canvasState.element);
+        const otherUsers = Array.from(canvasState.users.values()).filter(user => user.sessionId !== sessionId);
+        socket.emit('users-joined', otherUsers);
+
+        socket.to(canvasId).emit('user-joined', newUser);
+    }
+
+    private async handleElementCreated(socket: any, element: any) {
     }
 
 }

@@ -5,5 +5,5 @@ export const redis = new Redis({
     port: Number(process.env.REDIS_PORT) || 6379,
 });
 
-redis.on("connect", () => console.log("✅ Redis connected"));
-redis.on("error", (err) => console.error("❌ Redis error:", err));
+redis.on("connect", () => console.log("Redis connected"));
+redis.on("error", (err) => console.error("Redis error:", err));

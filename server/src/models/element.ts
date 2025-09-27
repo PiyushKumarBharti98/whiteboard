@@ -24,7 +24,6 @@ const elementSchema = new Schema<IElement, IElementModel>({
         required: false,
         default: 'Unititled',
         trim: true,
-        unique: true,
     },
     lastModified: {
         type: Date,
