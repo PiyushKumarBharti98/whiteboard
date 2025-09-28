@@ -91,7 +91,7 @@ export class SocketManager {
             });
             socket.on('user-cursors', async (data) => {
                 try {
-                    await this.handleElementUpdated(socket, data);
+                    await this.handleCursorPosition(socket, data);
                 } catch (error) {
                     socket.emit('error handling multiple cursors')
                 }
@@ -193,6 +193,16 @@ export class SocketManager {
 
         socket.to(canvasId).emit('element-deleted', deletedElement);
         this.scheduleDatabaseSave(canvasId);
+    }
+
+    private async handleCursorPosition(socket: any, cursorPosition: { x: number, y: number }) {
+        const canvasId = socket.data.canvasId;
+        const sessionId = socket.data.sessionId;
+
+        if (!canvasId || !sessionId) {
+            return;
+        }
+        socket.to(canvasId).emit('user-cursors', { sessionId, ...cursorPosition });
     }
 
 
