@@ -5,6 +5,7 @@ import { User } from '../models/User';
 import { socketAuthenticate } from '../middlewares/authMiddleware';
 import { error } from 'console';
 import { element } from '../models/element';
+import { exit } from 'process';
 
 interface UserState {
     sessionId: string;
@@ -74,16 +75,16 @@ export class SocketManager {
                     console.log('error creating element')
                 }
             });
-            socket.on('element-updated', async (dataToUpdate, oldData) => {
+            socket.on('element-updated', async (updatedElement) => {
                 try {
-                    await this.handleElementUpdated(socket, dataToUpdate, oldData);
+                    await this.handleElementUpdated(socket, updatedElement);
                 } catch (error) {
                     socket.emit('error updating element');
                 }
             });
             socket.on('element-deleted', async (data) => {
                 try {
-                    await this.handleElementUpdated(socket, data);
+                    await this.handleElementDeleted(socket, data);
                 } catch (error) {
                     socket.emit('error deleting element')
                 }
@@ -134,7 +135,66 @@ export class SocketManager {
     }
 
     private async handleElementCreated(socket: any, element: any) {
+        const canvasId = socket.data.canvasId;
+        if (!canvasId) {
+            return;
+        }
+
+        const canvasState = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            console.log(`Error canvasState not found with canvasId ${canvasId}`);
+            return;
+        }
+
+        canvasState.element.push(element);
+
+        socket.to(canvasId).emit('element-created', element);
+
+        this.scheduleDatabaseSave(canvasId);
     }
+
+    private async handleElementUpdated(socket: any, updatedElement: any) {
+        const canvasId = socket.data.canvasId;
+        if (!canvasId || !updatedElement || !updatedElement.id) {
+            return;
+        }
+
+        const canvasState = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            console.log(`Error canvasState not found with canvasId ${canvasId}`);
+            return;
+        }
+
+        const elementIndex = canvasState.element.findIndex(el => el.id === updatedElement.id);
+
+        if (elementIndex !== -1) {
+            canvasState.element[elementIndex] = updatedElement;
+            socket.to(canvasId).emit('element-updated', updatedElement);
+            this.scheduleDatabaseSave(canvasId);
+        }
+
+    }
+    private async handleElementDeleted(socket: any, deletedElement: any) {
+        const canvasId = socket.data.canvasId;
+        if (!canvasId || !deletedElement || !deletedElement.id) {
+            return;
+        }
+
+        const canvasState = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            console.log(`Error canvasState not found with canvasId ${canvasId}`);
+            return;
+        }
+
+        canvasState.element = canvasState.element.filter(el => el.id !== deletedElement.id);
+
+        socket.to(canvasId).emit('element-deleted', deletedElement);
+        this.scheduleDatabaseSave(canvasId);
+    }
+
 
 }
 
