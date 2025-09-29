@@ -20,6 +20,7 @@ interface CanvasState {
 export class SocketManager {
     private io: SocketIOServer;
     private connectedUser: Map<string> = new Map();
+    private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
     constructor(server: HTTPServer) {
         this.io = new SocketIOServer(server, {
@@ -203,6 +204,31 @@ export class SocketManager {
             return;
         }
         socket.to(canvasId).emit('user-cursors', { sessionId, ...cursorPosition });
+    }
+
+    private scheduleDatabaseSave(canvasId: string) {
+        if (this.debounceTimers.has(canvasId)) {
+            clearTimeout(this.debounceTimers.get(canvasId));
+        }
+
+        const timer = setTimeout(async () => {
+            console.log(`saving canvas to ${canvasId} to database`);
+            const canvasState = this.activeCanvases.get(canvasId);
+            if (canvasId) {
+                try {
+                    await element.findByIdAndUpdate(canvasId, {
+                        element: canvasState.element,
+                        lastModified: new Date()
+                    });
+                    console.log(`canvas ${canvasId} has successfully`);
+                }
+                catch (error) {
+                    console.error(`error saving canvas ${canvasId}`);
+                }
+            }
+            this.debounceTimers.delete(canvasId);
+        }, 5000);
+        this.debounceTimers.set(canvasId, timer);
     }
 
 
