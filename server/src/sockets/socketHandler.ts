@@ -6,6 +6,7 @@ import { socketAuthenticate } from '../middlewares/authMiddleware';
 import { error } from 'console';
 import { element } from '../models/element';
 import { exit } from 'process';
+import { console } from 'inspector';
 
 interface UserState {
     sessionId: string;
@@ -61,7 +62,7 @@ export class SocketManager {
                     socket.emit(`join-error could not join canvas`)
                 }
             });
-            socket.on('leave-canvas', (canvasId: string) => {
+            socket.on('user-left', (canvasId: string) => {
                 try {
                     await this.handleLeaveCanvas(canvasId);
                 } catch (error) {
@@ -135,6 +136,32 @@ export class SocketManager {
         socket.to(canvasId).emit('user-joined', newUser);
     }
 
+    private async handleLeaveCanvas(socket: any) {
+        const { canvasId, sessionId } = socket.data;
+
+        if (!canvasId || !sessionId) {
+            return;
+        }
+
+        socket.join(canvasId);
+        console.log(`user ${sessionId} joined with canvasId ${canvasId}`);
+
+        const canvasState = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            return;
+        }
+
+        canvasState.users.delete(sessionId);
+        console.log(`user ${sessionId} left the canvas ${canvasId}`);
+
+        socket.to(canvasId).emit('user-left', sessionId);
+
+        // optimization future
+    }
+
+
+
     private async handleElementCreated(socket: any, element: any) {
         const canvasId = socket.data.canvasId;
         if (!canvasId) {
@@ -203,6 +230,18 @@ export class SocketManager {
         if (!canvasId || !sessionId) {
             return;
         }
+        const canvasState = this.activeCanvases.get(canvasId);
+
+        if (!canvasState) {
+            console.log(`Error canvasState not found with canvasId ${canvasId}`);
+            return;
+        }
+
+        const userState = canvasState.users.get(sessionId);
+        if (userState) {
+            userState.cursors = cursorPosition;
+        }
+
         socket.to(canvasId).emit('user-cursors', { sessionId, ...cursorPosition });
     }
 
@@ -217,7 +256,7 @@ export class SocketManager {
             if (canvasId) {
                 try {
                     await element.findByIdAndUpdate(canvasId, {
-                        element: canvasState.element,
+                        elements: canvasState.element,
                         lastModified: new Date()
                     });
                     console.log(`canvas ${canvasId} has successfully`);
@@ -230,7 +269,5 @@ export class SocketManager {
         }, 5000);
         this.debounceTimers.set(canvasId, timer);
     }
-
-
 }
 

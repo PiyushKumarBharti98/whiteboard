@@ -1,4 +1,3 @@
-
 import mongoose, { Document, Schema, Model } from "mongoose";
 
 // This interface defines the structure of a single canvas document in MongoDB.
