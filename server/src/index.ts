@@ -6,6 +6,7 @@ import { connectDB } from "./config/db";
 import { redis } from "./config/redis";
 import { asyncWrapProviders } from "async_hooks";
 
+
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
