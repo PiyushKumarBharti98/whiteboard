@@ -1,7 +1,7 @@
-type Tool = "select" | "pencil" | "rectangle" | "pan";
-type drawingState = "idle" | "drawing" | "moving" | "panning";
+export type Tool = "select" | "pencil" | "rectangle" | "pan";
+export type drawingState = "idle" | "drawing" | "moving" | "panning";
 
-interface ElementBase {
+export interface ElementBase {
     id: string;
     x: number;
     y: number;
@@ -11,18 +11,18 @@ interface ElementBase {
     stroke: string;
 }
 
-interface PencilElement extends ElementBase {
+export interface PencilElement extends ElementBase {
     type: "pencil";
     points: { x: number; y: number }[];
 }
 
-interface RectangleElement extends ElementBase {
+export interface RectangleElement extends ElementBase {
     type: "rectangle";
 }
 
-type WhiteBoardElement = PencilElement | RectangleElement;
+export type WhiteBoardElement = PencilElement | RectangleElement;
 
-interface Cursor {
+export interface Cursor {
     x: number;
     y: number;
     sessionId: string;
