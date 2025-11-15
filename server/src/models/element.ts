@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema, Model, Types } from "mongoose";
+import mongoose, { Document, Model, Schema, Types } from "mongoose";
 
 export interface IElementSchema {
     _id: Types.UUID;
@@ -22,7 +22,7 @@ const elementSchema = new Schema<IElement, IElementModel>({
     title: {
         type: String,
         required: false,
-        default: 'Unititled',
+        default: "Untitled",
         trim: true,
     },
     lastModified: {
@@ -35,4 +35,7 @@ const elementSchema = new Schema<IElement, IElementModel>({
     },
 });
 
-export const element = mongoose.model<IElement, IElementModel>('Element', elementSchema);
+export const element = mongoose.model<IElement, IElementModel>(
+    "Element",
+    elementSchema,
+);

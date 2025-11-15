@@ -5,6 +5,7 @@ import app from "./app";
 import { connectDB } from "./config/db";
 import { redis } from "./config/redis";
 import { asyncWrapProviders } from "async_hooks";
+import { SocketManager } from "./sockets/socketHandler";
 
 
 dotenv.config();
@@ -13,11 +14,7 @@ const PORT = process.env.PORT || 5000;
 
 const server = http.createServer(app);
 
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-    },
-});
+new SocketManager(server);
 
 const startSever = async () => {
     try {

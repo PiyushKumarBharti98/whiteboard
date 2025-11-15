@@ -1,16 +1,10 @@
-import { Server as SocketIOServer } from 'socket.io';
-import mongoose from "mongoose";
-import { Server as HTTPServer } from 'http';
-import { User } from '../models/User';
-import { socketAuthenticate } from '../middlewares/authMiddleware';
-import { error } from 'console';
-import { element } from '../models/element';
-import { exit } from 'process';
-import { console } from 'inspector';
+import { Server as SocketIOServer, Socket } from "socket.io";
+import { Server as HTTPServer } from "http";
+import { element as ElementModel } from "../models/element";
 
 interface UserState {
     sessionId: string;
-    cursors?: { x: number, y: number };
+    cursors?: { x: number; y: number };
 }
 
 interface CanvasState {
@@ -20,15 +14,15 @@ interface CanvasState {
 
 export class SocketManager {
     private io: SocketIOServer;
-    private connectedUser: Map<string> = new Map();
+    private activeCanvases = new Map<string, CanvasState>();
     private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
     constructor(server: HTTPServer) {
         this.io = new SocketIOServer(server, {
             cors: {
-                origin: process.env.CLIENT_URL || "http://localhost:3000",
-                methods: ['GET', 'POST']
-            }
+                origin: process.env.CLIENT_URL || "http://localhost:5173",
+                methods: ["GET", "POST"],
+            },
         });
         this.setupMiddlewares();
         this.setupEventHandlers();
@@ -38,211 +32,177 @@ export class SocketManager {
         this.io.use((socket, next) => {
             try {
                 const { canvasId, sessionId } = socket.handshake.auth;
-                if (!canvasId || typeof.canvasId !== 'string') {
-                    return next(new Error("invalid connection canvasId is required "));
+                if (!canvasId || typeof canvasId !== "string") {
+                    return next(
+                        new Error("invalid connection canvasId is required"),
+                    );
                 }
                 socket.data.canvasId = canvasId;
                 socket.data.sessionId = sessionId;
                 next();
             } catch (error) {
+                console.error("Authentication error:", error);
                 next(new Error("authentication error"));
-            };
+            }
         });
     }
-
-    private activeCanvases = new Map<string, CanvasState>
 
     private setupEventHandlers() {
-        this.io.on('connection', (socket) => {
-            socket.on('join-canvas', (canvasId: string) => {
+        this.io.on("connection", (socket: Socket) => {
+            // Added async here
+            socket.on("join-canvas", async () => {
                 try {
-                    await this.handleJoinCanvas(canvasId);
+                    await this.handleJoinCanvas(socket);
                 } catch (error) {
-                    console.error(`error joining canvas for ${canvasId}: `, error);
-                    socket.emit(`join-error could not join canvas`)
+                    console.error(
+                        `error joining canvas for ${socket.data.canvasId}: `,
+                        error,
+                    );
+                    socket.emit("join-error", "could not join canvas");
                 }
             });
-            socket.on('user-left', (canvasId: string) => {
+
+            socket.on("element-update", async (elements: any[]) => {
                 try {
-                    await this.handleLeaveCanvas(canvasId);
+                    await this.handleElementUpdate(socket, elements);
                 } catch (error) {
-                    console.error(`error leaving canvas for ${canvasId}: `, error);
-                    socket.emit(`leave-error could not leave canvas`)
+                    console.log("error updating element");
                 }
             });
-            socket.on('element-created', async (data) => {
+
+            socket.on(
+                "user-cursors",
+                async (data: { x: number; y: number }) => {
+                    try {
+                        await this.handleCursorPosition(socket, data);
+                    } catch (error) {
+                        socket.emit("error handling multiple cursors");
+                    }
+                },
+            );
+
+            socket.on("disconnect", async () => {
                 try {
-                    await this.handleElementCreated(socket, data);
+                    await this.handleLeaveCanvas(socket);
                 } catch (error) {
-                    console.log('error creating element')
-                }
-            });
-            socket.on('element-updated', async (updatedElement) => {
-                try {
-                    await this.handleElementUpdated(socket, updatedElement);
-                } catch (error) {
-                    socket.emit('error updating element');
-                }
-            });
-            socket.on('element-deleted', async (data) => {
-                try {
-                    await this.handleElementDeleted(socket, data);
-                } catch (error) {
-                    socket.emit('error deleting element')
-                }
-            });
-            socket.on('user-cursors', async (data) => {
-                try {
-                    await this.handleCursorPosition(socket, data);
-                } catch (error) {
-                    socket.emit('error handling multiple cursors')
+                    console.error(
+                        `error leaving canvas for ${socket.data.canvasId}: `,
+                        error,
+                    );
+                    socket.emit("leave-error", "could not leave canvas");
                 }
             });
         });
     }
 
-    private async handleJoinCanvas(socket: any) {
+    private async handleJoinCanvas(socket: Socket) {
         const { canvasId, sessionId } = socket.data;
+        if (!canvasId || !sessionId) return;
 
         socket.join(canvasId);
-        console.log(`user ${sessionId} joined with canvasId ${canvasId}`);
+        console.log(
+            `user ${sessionId} (${socket.id}) joined canvas ${canvasId}`,
+        );
 
-        let canvasState: CanvasState | undefined = this.activeCanvases.get(canvasId);
+        let canvasState: CanvasState | undefined =
+            this.activeCanvases.get(canvasId);
 
         if (!canvasState) {
-            console.log(`canvasState not active of the canvas id ${canvasId}`);
-            const canvasDoc = await element.findById(canvasId);
+            console.log(
+                `Canvas state not active for ${canvasId}, fetching from DB...`,
+            );
+            // Use ElementModel (from element.ts)
+            const canvasDoc = await ElementModel.findById(canvasId);
 
-            if (!canvasDoc) {
-                socket.emit('error data could not be found');
-                return;
+            if (canvasDoc) {
+                canvasState = {
+                    element: canvasDoc.element || [],
+                    users: new Map<string, UserState>(),
+                };
+            } else {
+                // Or create a new one if it doesn't exist
+                console.log(
+                    `No canvas found for ${canvasId}, creating new one.`,
+                );
+                canvasState = {
+                    element: [],
+                    users: new Map<string, UserState>(),
+                };
             }
-
-            canvasState = {
-                element: canvasDoc.element || [],
-                users: new Map<string, UserState>()
-            }
-
             this.activeCanvases.set(canvasId, canvasState);
         }
 
         const newUser: UserState = { sessionId };
         canvasState.users.set(socket.id, newUser);
 
-        socket.emit('canvas state', canvasState.element);
-        const otherUsers = Array.from(canvasState.users.values()).filter(user => user.sessionId !== sessionId);
-        socket.emit('users-joined', otherUsers);
+        socket.emit("canvas-state", canvasState.element);
 
-        socket.to(canvasId).emit('user-joined', newUser);
+        const otherUsers = Array.from(canvasState.users.values()).filter(
+            (user) => user.sessionId !== sessionId,
+        );
+        socket.emit("users-joined", otherUsers);
+
+        socket.to(canvasId).emit("user-joined", newUser);
     }
 
-    private async handleLeaveCanvas(socket: any) {
+    private async handleLeaveCanvas(socket: Socket) {
         const { canvasId, sessionId } = socket.data;
-
-        if (!canvasId || !sessionId) {
-            return;
-        }
-
-        socket.join(canvasId);
-        console.log(`user ${sessionId} joined with canvasId ${canvasId}`);
+        if (!canvasId || !sessionId) return;
 
         const canvasState = this.activeCanvases.get(canvasId);
+        if (!canvasState) return;
 
-        if (!canvasState) {
-            return;
-        }
+        canvasState.users.delete(socket.id);
+        console.log(`user ${sessionId} (${socket.id}) left canvas ${canvasId}`);
 
-        canvasState.users.delete(sessionId);
-        console.log(`user ${sessionId} left the canvas ${canvasId}`);
+        socket.to(canvasId).emit("user-left", { sessionId });
 
-        socket.to(canvasId).emit('user-left', sessionId);
-
-        // optimization future
+        // Future optimization: if no users left, clear canvas from memory
+        // if (canvasState.users.size === 0) {
+        //     this.activeCanvases.delete(canvasId);
+        //     console.log(`Cleared inactive canvas ${canvasId} from memory.`);
+        // }
     }
 
-
-
-    private async handleElementCreated(socket: any, element: any) {
+    private async handleElementUpdate(socket: Socket, elements: any[]) {
         const canvasId = socket.data.canvasId;
-        if (!canvasId) {
-            return;
-        }
+        if (!canvasId) return;
 
         const canvasState = this.activeCanvases.get(canvasId);
-
         if (!canvasState) {
-            console.log(`Error canvasState not found with canvasId ${canvasId}`);
+            console.log(
+                `Error: canvasState not found with canvasId ${canvasId}`,
+            );
             return;
         }
 
-        canvasState.element.push(element);
+        canvasState.element = elements;
 
-        socket.to(canvasId).emit('element-created', element);
+        socket.to(canvasId).emit("elements-updated", elements);
 
         this.scheduleDatabaseSave(canvasId);
     }
 
-    private async handleElementUpdated(socket: any, updatedElement: any) {
-        const canvasId = socket.data.canvasId;
-        if (!canvasId || !updatedElement || !updatedElement.id) {
-            return;
-        }
-
-        const canvasState = this.activeCanvases.get(canvasId);
-
-        if (!canvasState) {
-            console.log(`Error canvasState not found with canvasId ${canvasId}`);
-            return;
-        }
-
-        const elementIndex = canvasState.element.findIndex(el => el.id === updatedElement.id);
-
-        if (elementIndex !== -1) {
-            canvasState.element[elementIndex] = updatedElement;
-            socket.to(canvasId).emit('element-updated', updatedElement);
-            this.scheduleDatabaseSave(canvasId);
-        }
-
-    }
-    private async handleElementDeleted(socket: any, deletedElement: any) {
-        const canvasId = socket.data.canvasId;
-        if (!canvasId || !deletedElement || !deletedElement.id) {
-            return;
-        }
-
-        const canvasState = this.activeCanvases.get(canvasId);
-
-        if (!canvasState) {
-            console.log(`Error canvasState not found with canvasId ${canvasId}`);
-            return;
-        }
-
-        canvasState.element = canvasState.element.filter(el => el.id !== deletedElement.id);
-
-        socket.to(canvasId).emit('element-deleted', deletedElement);
-        this.scheduleDatabaseSave(canvasId);
-    }
-
-    private async handleCursorPosition(socket: any, cursorPosition: { x: number, y: number }) {
+    private async handleCursorPosition(
+        socket: Socket,
+        cursorPosition: { x: number; y: number },
+    ) {
         const canvasId = socket.data.canvasId;
         const sessionId = socket.data.sessionId;
+        if (!canvasId || !sessionId) return;
 
-        if (!canvasId || !sessionId) {
-            return;
-        }
         const canvasState = this.activeCanvases.get(canvasId);
+        if (!canvasState) return;
 
-        if (!canvasState) {
-            console.log(`Error canvasState not found with canvasId ${canvasId}`);
-            return;
-        }
-
-        const userState = canvasState.users.get(sessionId);
+        const userState = canvasState.users.get(socket.id);
         if (userState) {
             userState.cursors = cursorPosition;
         }
 
-        socket.to(canvasId).emit('user-cursors', { sessionId, ...cursorPosition });
+        socket.to(canvasId).emit("user-cursors", {
+            sessionId,
+            ...cursorPosition,
+        });
     }
 
     private scheduleDatabaseSave(canvasId: string) {
@@ -251,18 +211,21 @@ export class SocketManager {
         }
 
         const timer = setTimeout(async () => {
-            console.log(`saving canvas to ${canvasId} to database`);
+            console.log(`Saving canvas ${canvasId} to database...`);
             const canvasState = this.activeCanvases.get(canvasId);
-            if (canvasId) {
+            if (canvasState) {
                 try {
-                    await element.findByIdAndUpdate(canvasId, {
-                        elements: canvasState.element,
-                        lastModified: new Date()
-                    });
-                    console.log(`canvas ${canvasId} has successfully`);
-                }
-                catch (error) {
-                    console.error(`error saving canvas ${canvasId}`);
+                    await ElementModel.findByIdAndUpdate(
+                        canvasId,
+                        {
+                            element: canvasState.element,
+                            lastModified: new Date(),
+                        },
+                        { upsert: true, new: true },
+                    );
+                    console.log(`Canvas ${canvasId} successfully saved.`);
+                } catch (error) {
+                    console.error(`Error saving canvas ${canvasId}:`, error);
                 }
             }
             this.debounceTimers.delete(canvasId);
@@ -270,4 +233,3 @@ export class SocketManager {
         this.debounceTimers.set(canvasId, timer);
     }
 }
-
