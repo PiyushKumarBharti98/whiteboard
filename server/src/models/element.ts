@@ -1,7 +1,7 @@
 import mongoose, { Document, Model, Schema, Types } from "mongoose";
 
 export interface IElementSchema {
-    _id: Types.UUID;
+    _id: string;
     element: Array<Object>;
     title: string;
     lastModified: Date;
@@ -10,10 +10,12 @@ export interface IElementSchema {
 
 export type IElement = IElementSchema & Document;
 
-export interface IElementModel extends Model<IElement> {
-}
+export interface IElementModel extends Model<IElement> {}
 
 const elementSchema = new Schema<IElement, IElementModel>({
+    _id: {
+        type: String,
+    },
     element: {
         type: [Object],
         required: false,

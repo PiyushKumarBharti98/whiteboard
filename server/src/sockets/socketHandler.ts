@@ -120,7 +120,6 @@ export class SocketManager {
                     users: new Map<string, UserState>(),
                 };
             } else {
-                // Or create a new one if it doesn't exist
                 console.log(
                     `No canvas found for ${canvasId}, creating new one.`,
                 );
@@ -168,21 +167,43 @@ export class SocketManager {
         const canvasId = socket.data.canvasId;
         if (!canvasId) return;
 
-        const canvasState = this.activeCanvases.get(canvasId);
+        let canvasState = this.activeCanvases.get(canvasId);
+
         if (!canvasState) {
             console.log(
-                `Error: canvasState not found with canvasId ${canvasId}`,
+                `Canvas state missing for update on ${canvasId}, attempting to load...`,
+            );
+            try {
+                const canvasDoc = await ElementModel.findById(canvasId);
+                if (canvasDoc) {
+                    canvasState = {
+                        element: canvasDoc.element || [],
+                        users: new Map<string, UserState>(),
+                    };
+                } else {
+                    canvasState = {
+                        element: [],
+                        users: new Map<string, UserState>(),
+                    };
+                }
+                this.activeCanvases.set(canvasId, canvasState);
+            } catch (error) {
+                console.error(`Error loading canvas during update:`, error);
+                return;
+            }
+        }
+
+        if (!canvasState) {
+            console.log(
+                `Error: canvasState could not be established for ${canvasId}`,
             );
             return;
         }
 
         canvasState.element = elements;
-
         socket.to(canvasId).emit("elements-updated", elements);
-
         this.scheduleDatabaseSave(canvasId);
     }
-
     private async handleCursorPosition(
         socket: Socket,
         cursorPosition: { x: number; y: number },
