@@ -1,6 +1,9 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { element as ElementModel } from "../models/element";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { redis } from "../config/redis"; // Your existing redis client
+import { create } from "node:domain";
 
 interface UserState {
     sessionId: string;
@@ -18,12 +21,24 @@ export class SocketManager {
     private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
     constructor(server: HTTPServer) {
+        // this.io = new SocketIOServer(server, {
+        //     cors: {
+        //         origin: process.env.CLIENT_URL || "http://localhost:5173",
+        //         methods: ["GET", "POST"],
+        //     },
+        // });
+
         this.io = new SocketIOServer(server, {
             cors: {
                 origin: process.env.CLIENT_URL || "http://localhost:5173",
                 methods: ["GET", "POST"],
             },
         });
+
+        const pubClient = redis;
+        const subClient = redis.duplicate();
+        this.io.adapter(createAdapter(pubClient, subClient));
+
         this.setupMiddlewares();
         this.setupEventHandlers();
     }
@@ -104,8 +119,20 @@ export class SocketManager {
             `user ${sessionId} (${socket.id}) joined canvas ${canvasId}`,
         );
 
-        let canvasState: CanvasState | undefined =
-            this.activeCanvases.get(canvasId);
+        // let canvasState: CanvasState | undefined =
+        //     this.activeCanvases.get(canvasId);
+
+        let elements = [];
+        const redisKey = `canvas:${canvasId}elements`;
+        const cachedElements = await redis.get(redisKey);
+
+        if (cachedElements) {
+            elements = JSON.parse(cachedElements);
+        } else {
+            const canvasDoc = await ElementModel.findById(canvasId);
+            elements = canvasDoc?.elements || [];
+            await redis.set(redisKey, JSON.stringify(elements), "EX", 3600);
+        }
 
         if (!canvasState) {
             console.log(
@@ -134,11 +161,19 @@ export class SocketManager {
         const newUser: UserState = { sessionId };
         canvasState.users.set(socket.id, newUser);
 
-        socket.emit("canvas-state", canvasState.element);
+        socket.emit("canvas-state", elements);
+        // socket.emit("canvas-state", canvasState.element);
 
-        const otherUsers = Array.from(canvasState.users.values()).filter(
-            (user) => user.sessionId !== sessionId,
-        );
+        const sockets = await this.io.in(canvasId).fetchSockets();
+
+        const otherUsers = sockets
+            .filter((s) => s.data.sessionId !== sessionId)
+            .map((s) => ({ sessionId: s.data.sessionId }));
+
+        // const otherUsers = Array.from(canvasState.users.values()).filter(
+        //     (user) => user.sessionId !== sessionId,
+        // );
+        //
         socket.emit("users-joined", otherUsers);
 
         socket.to(canvasId).emit("user-joined", newUser);
@@ -167,7 +202,25 @@ export class SocketManager {
         const canvasId = socket.data.canvasId;
         if (!canvasId) return;
 
-        let canvasState = this.activeCanvases.get(canvasId);
+        // let canvasState = this.activeCanvases.get(canvasId);
+
+        const cachedState = await redis.get(`canvas:${canvasId}`);
+        let elements = [];
+
+        if (cachedState) {
+            elements = JSON.parse(cachedState);
+        } else {
+            const doc = await ElementModel.findById(elements);
+            elements = doc?.elements || [];
+            await redis.get(
+                `canvas:${canvasId}`,
+                JSON.stringify(elements),
+                "EX",
+                3600,
+            );
+        }
+
+        socket.emit("canvas-state", elements);
 
         if (!canvasState) {
             console.log(
